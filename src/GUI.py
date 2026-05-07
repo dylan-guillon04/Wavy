@@ -1,22 +1,55 @@
 import customtkinter as ctk
+import tkinter as tk
 from tkinter import filedialog
 import os
 import sounddevice as sd
 import numpy as np
+from tksvg import load as tksvg_load
 from AudioHandler import AudioHandler
 from FilterProcessor import FilterProcessor
 
-# test
 
 ctk.set_appearance_mode("light") 
 ctk.set_default_color_theme("blue")
+
+FILTER_SVG_FILES = {
+    "Passe bas": "filter-lowpass.svg",
+    "Passe haut": "filter-highpass.svg",
+    "Sélecteur": "filter-bandpass.svg",
+    "Rejecteur": "filter-notch.svg"
+}
+
+def load_svg_icon(master, filter_type, size=36):
+    filename = FILTER_SVG_FILES.get(filter_type)
+    if not filename:
+        return None
+
+    svg_path = os.path.join(os.path.dirname(__file__), "statics", filename)
+    if not os.path.exists(svg_path):
+        return None
+
+    try:
+        root = master.winfo_toplevel()
+        tksvg_load(root)
+        photo = tk.PhotoImage(master=master, file=svg_path, format="svg", width=size, height=size)
+        return ctk.CTkImage(light_image=photo, size=(size, size))
+    except Exception:
+        return None
 
 class FilterBlock(ctk.CTkFrame):
     def __init__(self, master, filter_type, **kwargs):
         super().__init__(master, fg_color="transparent", border_width=2, border_color="#3b4ccc", corner_radius=10, **kwargs)
         self.filter_type = filter_type
+        self.icon_image = load_svg_icon(self, filter_type, size=36)
+
+        if self.icon_image is not None:
+            self.icon_label = ctk.CTkLabel(self, image=self.icon_image, text="")
+        else:
+            self.icon_label = ctk.CTkLabel(self, text=self.get_logo_symbol(filter_type), font=("Helvetica", 24), text_color="#3b4ccc")
+        self.icon_label.pack(padx=10, pady=(10, 0))
+
         self.label = ctk.CTkLabel(self, text=filter_type, font=("Helvetica", 13, "bold"), text_color="#3b4ccc")
-        self.label.pack(padx=10, pady=(8, 0))
+        self.label.pack(padx=10, pady=(4, 0))
         
         self.param_label = ctk.CTkLabel(self, text="Fréq: 1000 Hz", font=("Helvetica", 10), text_color="black")
         self.param_label.pack()
@@ -25,14 +58,28 @@ class FilterBlock(ctk.CTkFrame):
         self.slider.set(1000)
         self.slider.pack(padx=10, pady=(5, 10))
 
+    def load_logo_image(self, filter_type):
+        return load_svg_icon(self, filter_type, size=36)
+
+    def get_logo_symbol(self, filter_type):
+        logos = {
+            "Passe bas": "↓",
+            "Passe haut": "↑",
+            "Sélecteur": "^",
+            "Rejecteur": "v"
+        }
+        return logos.get(filter_type, "🎛️")
+
     def update_label(self, value):
         self.param_label.configure(text=f"Fréq: {int(value)} Hz")
 
 class DraggableFilter(ctk.CTkButton):
     def __init__(self, master, filter_type, app_ref, **kwargs):
-        super().__init__(master, text=filter_type, width=120, height=80, fg_color="#f0f0f0",
+        self.icon_image = load_svg_icon(master, filter_type, size=24)
+        super().__init__(master, text=filter_type, width=120, height=100, fg_color="#f0f0f0",
                          font=("Helvetica", 14, "bold"),
-                         border_color="#3b4ccc", border_width=2, text_color="#3b4ccc", **kwargs)
+                         border_color="#3b4ccc", border_width=2, text_color="#3b4ccc",
+                         image=self.icon_image, compound="top", **kwargs)
         self.filter_type = filter_type
         self.app_ref = app_ref
         self.bind("<ButtonPress-1>", self.on_start)
@@ -144,7 +191,7 @@ class App(ctk.CTk):
         self.scroll_canvas.grid(row=1, column=0, columnspan=2, sticky="nsew", padx=10, pady=10)
         self.tracks = []
 
-        # --- Zone Bas (Play All) ---
+        # Bottom Bar
         self.bottom_bar = ctk.CTkFrame(self, height=80, fg_color="#606060", corner_radius=10)
         self.bottom_bar.grid(row=2, column=0, columnspan=2, sticky="ew", padx=20, pady=20)
         
