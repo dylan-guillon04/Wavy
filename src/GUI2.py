@@ -40,11 +40,54 @@ def get_filter_icon_path(filename):
     return os.path.join(os.path.dirname(__file__), "statics", filename)
 
 
+class FilterBlock(ctk.CTkFrame):
+    def __init__(self, master, filter_type, app_ref, **kwargs):
+        super().__init__(master, fg_color=COLORS["top_gradient"], border_width=2, border_color=COLORS["main"],
+                         corner_radius=10, width=220, height=100, **kwargs)
+        self.pack_propagate(False)
+        self.filter_type = filter_type
+        self.app_ref = app_ref
+
+
+        icon_path = get_filter_icon_path(FILTER_IMG_FILES[filter_type])
+        self.icon_image = ctk.CTkImage(light_image=Image.open(icon_path), size=(32, 32))
+        self.icon_label = ctk.CTkLabel(self, image=self.icon_image, text="")
+        self.icon_label.grid(row=1, column=0, rowspan=2, padx=5)
+
+        self.title_label = ctk.CTkLabel(self, text=filter_type, font=("Helvetica", 13, "bold"), text_color=COLORS["primary_text"], bg_color="transparent")
+        self.title_label.grid(row=0, column=0, columnspan=3, padx=5, sticky="n")
+
+        self.param_label = ctk.CTkLabel(self, text="Fréquence de coupure (Hz)", font=("Helvetica", 10), text_color=COLORS["secondary_text"])
+        self.param_label.grid(row=1, column=1, padx=5, pady=5)
+        self.param_entry = ctk.CTkEntry(self, width=60, height=20, font=("Helvetica", 10), fg_color=COLORS["bottom_gradient"], text_color=COLORS["primary_text"], border_width=2, border_color=COLORS["background"], corner_radius=5)
+        self.param_entry.grid(row=1, column=2, padx=5, pady=5)
+        self.param_entry.insert(0, "1000")
+        self.param_entry.bind("<Return>", lambda e: self.update_slider(self.param_entry.get()))
+
+        self.param_slider = ctk.CTkSlider(self, from_=20, to=20000, height=16, width=200, command=self.update_entry)
+        self.param_slider.set(1000)
+        self.param_slider.grid(row=2, column=1, columnspan=2, padx=5, pady=5)
+
+    def update_entry(self, value):
+        freq = int(float(value))
+        self.param_entry.delete(0, tk.END)
+        self.param_entry.insert(0, str(freq))
+        
+    def update_slider(self, value):
+        try:
+            freq = int(value)
+            self.param_slider.set(freq)
+        except ValueError:
+            pass
+
+
 class DragableFilterBlock(ctk.CTkFrame):
-    def __init__(self, master, filter_type, **kwargs):
+    def __init__(self, master, filter_type, app_ref, **kwargs):
         super().__init__(master, fg_color=COLORS["top_gradient"], border_width=2, border_color=COLORS["main"],
                          corner_radius=10, width=120, height=80, **kwargs)
         self.pack_propagate(False)
+        self.filter_type = filter_type
+        self.app_ref = app_ref
         
         icon_path = get_filter_icon_path(FILTER_IMG_FILES[filter_type])
         self.icon_image = ctk.CTkImage(light_image=Image.open(icon_path), size=(36, 36))
@@ -54,8 +97,36 @@ class DragableFilterBlock(ctk.CTkFrame):
         self.label = ctk.CTkLabel(self, text=filter_type, font=("Helvetica", 13, "bold"), text_color=COLORS["primary_text"])
         self.label.pack(padx=10, pady=(4, 0))
 
+        self.bind("<ButtonPress-1>", self.on_start)
+        self.bind("<B1-Motion>", self.on_drag)
+        self.bind("<ButtonRelease-1>", self.on_drop)
         self.bind("<Enter>", self.on_enter)
         self.bind("<Leave>", self.on_leave)
+        self.ghost = None
+        
+    def on_start(self, event):
+        self.ghost = ctk.CTkToplevel(self)
+        self.ghost.overrideredirect(True)
+        self.ghost.attributes("-alpha", 0.7)
+        label = ctk.CTkLabel(self.ghost, text=self.filter_type, text_color=COLORS["primary_text"], font=("Helvetica", 12, "bold"), fg_color=COLORS["main"], width=120, height=80)
+        label.pack(padx=10, pady=5)
+        self.on_drag(event)
+
+    def on_drag(self, event):
+        if self.ghost:
+            self.ghost.geometry(f"+{self.winfo_pointerx()-50}+{self.winfo_pointery()-20}")
+
+    def on_drop(self, event):
+        if self.ghost:
+            self.ghost.destroy()
+            self.ghost = None
+            x, y = self.winfo_pointerxy()
+            target = self.app_ref.winfo_containing(x, y)
+            while target:
+                if isinstance(target, AudioTrack):
+                    target.add_filter_block(self.filter_type)
+                    break
+                target = target.master
 
     def on_enter(self, event):
         self.configure(border_color=COLORS["secondary"])
@@ -70,12 +141,12 @@ class AudioTrack(ctk.CTkFrame):
         self.audio_handler = AudioHandler()
         self.file_path = file_path
         self.is_playing = False
+        self.filter_blocks = []
 
         loaded = self.audio_handler.load_audio(file_path)
 
         header = ctk.CTkFrame(self, fg_color="transparent")
         header.pack(fill="x", padx=10, pady=(10, 0))
-
 
         # Load play/pause images
         play_icon_path = get_filter_icon_path("play.png")
@@ -96,7 +167,7 @@ class AudioTrack(ctk.CTkFrame):
         self.fig.subplots_adjust(left=0, right=1, top=1, bottom=0)
         
         self.canvas_widget = ctk.CTkFrame(self, fg_color="transparent")
-        self.canvas_widget.pack(fill="both", expand=True, padx=10, pady=(10, 15))
+        self.canvas_widget.pack(fill="both", expand=True, padx=10, pady=(10, 10))
         
         self.mpl_canvas = FigureCanvasTkAgg(self.fig, master=self.canvas_widget)
         self.mpl_canvas.get_tk_widget().pack(fill="both", expand=True)
@@ -113,6 +184,7 @@ class AudioTrack(ctk.CTkFrame):
         self.waveform_cache = None
         self.playback_data = None
         self.time_axis = None
+        self.filter_area = None
 
         if loaded:
             self.prepare_playback_data()
@@ -230,6 +302,16 @@ class AudioTrack(ctk.CTkFrame):
         self.ax.grid(True, alpha=0.2, color=COLORS["secondary_text"], linestyle='--', linewidth=0.5)
         
         self.mpl_canvas.draw_idle()
+        
+    def add_filter_block(self, filter_type):
+        if self.filter_area is None:
+            self.filter_area = ctk.CTkScrollableFrame(self, fg_color="transparent", height=100, orientation="horizontal")
+            self.filter_area.pack(fill="x", padx=10)
+        
+        block = FilterBlock(self.filter_area, filter_type, app_ref=self)
+        block.pack(side="left", padx=(0, 5))
+        
+        self.filter_blocks.append(block)
 
 
 class App(ctk.CTk):
@@ -264,7 +346,7 @@ class App(ctk.CTk):
         self.filters_frame = ctk.CTkFrame(self.top_bar, fg_color="transparent")
         self.filters_frame.place(relx=0.5, rely=0.5, anchor="center")
         for i, filter_type in enumerate(FILTER_IMG_FILES.keys()):
-            DragableFilterBlock(self.filters_frame, filter_type).grid(row=0, column=i+1, padx=10)
+            DragableFilterBlock(self.filters_frame, app_ref=self, filter_type=filter_type).grid(row=0, column=i+1, padx=10)
 
         #### Content Frame
         self.content_frame = ctk.CTkFrame(self.main_frame, fg_color="transparent", corner_radius=10)
@@ -273,7 +355,7 @@ class App(ctk.CTk):
 
         self.track_area = ctk.CTkScrollableFrame(self.content_frame, fg_color="transparent")
         self.track_area.pack(fill="both", expand=True)
-
+        
         self.track_frames = []
 
     def import_audio(self):
@@ -289,6 +371,8 @@ class App(ctk.CTk):
         track = AudioTrack(self.track_area, file_path)
         track.pack(fill="x", pady=12)
         self.track_frames.append(track)
+
+       
 
 if __name__ == "__main__":
     app = App()
