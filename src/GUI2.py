@@ -187,6 +187,7 @@ class AudioTrack(ctk.CTkFrame):
         self.is_playing = False
         self.filter_blocks = []
         self.app_ref = app_ref
+        self.volume = 0.5  # Default volume at 50%
         
         # Reference global images
         self.play_image = PLAY_IMAGE
@@ -219,8 +220,34 @@ class AudioTrack(ctk.CTkFrame):
         self.canvas_widget = ctk.CTkFrame(self, fg_color="transparent")
         self.canvas_widget.pack(fill="both", expand=True, padx=10, pady=(10, 10))
         
-        self.mpl_canvas = FigureCanvasTkAgg(self.fig, master=self.canvas_widget)
+        # Canvas on the left
+        canvas_frame = ctk.CTkFrame(self.canvas_widget, fg_color="transparent")
+        canvas_frame.pack(side="left", fill="both", expand=True)
+        
+        self.mpl_canvas = FigureCanvasTkAgg(self.fig, master=canvas_frame)
         self.mpl_canvas.get_tk_widget().pack(fill="both", expand=True)
+        
+        # Volume slider on the right
+        volume_frame = ctk.CTkFrame(self.canvas_widget, fg_color="transparent", width=50)
+        volume_frame.pack(side="right", fill="y", padx=(10, 0))
+        
+        volume_label = ctk.CTkLabel(volume_frame, text="Vol", text_color=COLORS["secondary_text"])
+        volume_label.pack()
+        
+        self.volume_slider = ctk.CTkSlider(
+            volume_frame, 
+            from_=0, 
+            to=100, 
+            height=100,
+            orientation="vertical",
+            command=self.on_volume_change
+        )
+        self.volume_slider.set(50)  # Default 50%
+        self.volume_slider.pack(fill="y", expand=True, padx=5)
+        
+        volume_value_label = ctk.CTkLabel(volume_frame, text="50%", text_color=COLORS["secondary_text"])
+        volume_value_label.pack()
+        self.volume_value_label = volume_value_label
         
         self.playhead_line = None
         self.waveform_line = None
@@ -250,52 +277,75 @@ class AudioTrack(ctk.CTkFrame):
         data = self.audio_handler.data * 0.5
         
         if not self.filter_blocks:
-            return data
+            data_filtered = data
+        else:
+            filter_processor = FilterProcessor()
+            data_filtered = data
+            
+            # Apply filters in cascade
+            for block in self.filter_blocks:
+                try:
+                    cutoff_str = block.param_entry.get()
+                    cutoff = float(cutoff_str)
+                    filter_type = block.filter_type
+                    sample_rate = self.audio_handler.sample_rate
+                    
+                    if filter_type == "Passe bas":
+                        data_filtered = filter_processor.low_pass(data_filtered, sample_rate, cutoff)
+                    elif filter_type == "Passe haut":
+                        data_filtered = filter_processor.high_pass(data_filtered, sample_rate, cutoff)
+                    elif filter_type == "Sélecteur":
+                        # For band-pass, use cutoff as center frequency with bandwidth
+                        data_filtered = filter_processor.band_pass(data_filtered, sample_rate, cutoff * 0.8, cutoff * 1.2)
+                    elif filter_type == "Rejecteur":
+                        # For band-stop, use cutoff as center frequency with bandwidth
+                        data_filtered = filter_processor.band_stop(data_filtered, sample_rate, cutoff * 0.8, cutoff * 1.2)
+                except (ValueError, AttributeError):
+                    # If error in filter parameters, skip this filter
+                    pass
         
-        filter_processor = FilterProcessor()
-        
-        # Apply filters in cascade
-        for block in self.filter_blocks:
-            try:
-                cutoff_str = block.param_entry.get()
-                cutoff = float(cutoff_str)
-                filter_type = block.filter_type
-                sample_rate = self.audio_handler.sample_rate
-                
-                if filter_type == "Passe bas":
-                    data = filter_processor.low_pass(data, sample_rate, cutoff)
-                elif filter_type == "Passe haut":
-                    data = filter_processor.high_pass(data, sample_rate, cutoff)
-                elif filter_type == "Sélecteur":
-                    # For band-pass, use cutoff as center frequency with bandwidth
-                    data = filter_processor.band_pass(data, sample_rate, cutoff * 0.8, cutoff * 1.2)
-                elif filter_type == "Rejecteur":
-                    # For band-stop, use cutoff as center frequency with bandwidth
-                    data = filter_processor.band_stop(data, sample_rate, cutoff * 0.8, cutoff * 1.2)
-            except (ValueError, AttributeError):
-                # If error in filter parameters, skip this filter
-                pass
-        
-        return data
+        # Apply volume
+        return data_filtered * self.volume
+    
+    def on_volume_change(self, value):
+        """Called when volume slider changes."""
+        self.volume = float(value) / 100.0
+        try:
+            self.volume_value_label.configure(text=f"{int(float(value))}%")
+        except Exception:
+            pass
 
     def toggle_play_pause(self, master):
         if self.audio_handler.data is None:
             return
 
         if self.is_playing:
-            sd.stop()
             self.is_playing = False
-            self.play_pause_button.configure(image=self.play_image)
+            try:
+                sd.stop()
+            except Exception:
+                pass
+            try:
+                self.play_pause_button.configure(image=self.play_image)
+            except Exception:
+                pass
             self.stop_playhead()
         else:
-            sd.stop()
+            try:
+                sd.stop()
+            except Exception:
+                pass
             # Apply filters before playing
             filtered_data = self.apply_filters()
-            sd.play(filtered_data, self.audio_handler.sample_rate)
-            self.is_playing = True
-            self.play_pause_button.configure(image=self.pause_image)
-            self.start_playhead()
-            threading.Thread(target=self._monitor_playback, daemon=True).start()
+            try:
+                sd.play(filtered_data, self.audio_handler.sample_rate)
+                self.is_playing = True
+                self.play_pause_button.configure(image=self.pause_image)
+                self.start_playhead()
+                threading.Thread(target=self._monitor_playback, daemon=True).start()
+            except Exception as e:
+                self.is_playing = False
+                print(f"Error playing audio: {e}")
             
     def start_playhead(self):
         self.playhead_animating = True
@@ -306,12 +356,16 @@ class AudioTrack(ctk.CTkFrame):
     def stop_playhead(self):
         self.playhead_animating = False
         if self.playhead_line is not None:
-            self.playhead_line.remove()
-            self.playhead_line = None
-            self.mpl_canvas.draw_idle()
+            try:
+                self.playhead_line.remove()
+                self.playhead_line = None
+                if self.winfo_exists():
+                    self.mpl_canvas.draw_idle()
+            except Exception:
+                self.playhead_line = None
 
     def _animate_playhead(self):
-        if not self.is_playing or not self.playhead_animating:
+        if not self.is_playing or not self.playhead_animating or not self.winfo_exists():
             self.stop_playhead()
             return
         duration = self.playhead_duration
@@ -322,15 +376,18 @@ class AudioTrack(ctk.CTkFrame):
         elapsed = time.monotonic() - self.playhead_start_time
         elapsed = max(0, min(elapsed, duration))
         
-        # Remove old playhead line
-        if self.playhead_line is not None:
-            self.playhead_line.remove()
+        try:
+            # Remove old playhead line
+            if self.playhead_line is not None:
+                self.playhead_line.remove()
+            
+            # Draw new playhead line
+            self.playhead_line = self.ax.axvline(x=elapsed, color=COLORS["secondary"], linewidth=2, alpha=0.8)
+            self.mpl_canvas.draw_idle()
+        except Exception:
+            self.playhead_line = None
         
-        # Draw new playhead line
-        self.playhead_line = self.ax.axvline(x=elapsed, color=COLORS["secondary"], linewidth=2, alpha=0.8)
-        self.mpl_canvas.draw_idle()
-        
-        if elapsed < duration and self.is_playing and self.playhead_animating:
+        if elapsed < duration and self.is_playing and self.playhead_animating and self.winfo_exists():
             self.after(20, self._animate_playhead)
         else:
             self.stop_playhead()
@@ -340,12 +397,18 @@ class AudioTrack(ctk.CTkFrame):
             sd.wait()
         except Exception:
             pass
-        self.after(0, self._playback_finished)
+        if self.winfo_exists():
+            self.after(0, self._playback_finished)
 
     def _playback_finished(self):
+        if not self.winfo_exists():
+            return
         if self.is_playing:
             self.is_playing = False
-            self.play_pause_button.configure(image=self.play_image)
+            try:
+                self.play_pause_button.configure(image=self.play_image)
+            except Exception:
+                pass
         self.stop_playhead()
 
     def draw_waveform(self):
@@ -407,7 +470,10 @@ class AudioTrack(ctk.CTkFrame):
     def delete_track(self):
         """Supprime la piste audio actuelle."""
         if self.is_playing:
-            sd.stop()
+            try:
+                sd.stop()
+            except Exception:
+                pass
             self.is_playing = False
         
         # Notify app that track is being deleted
@@ -461,6 +527,7 @@ class App(ctk.CTk):
         self.track_area.pack(fill="both", expand=True)
         
         self.track_frames = []
+        self.is_playing_all = False  # Track if all tracks are playing
         
         self.default_label = ctk.CTkLabel(self.content_frame, text="Importez une piste audio pour commencer", text_color=COLORS["secondary_text"])
         self.default_label.place(relx=0.5, rely=0.5, anchor="center")
@@ -471,9 +538,9 @@ class App(ctk.CTk):
         self.bottom_bar.grid_propagate(False)
         self.bottom_bar.grid_remove()  # Initially hidden
         
-        self.play_pause_all_button = ctk.CTkButton(self.bottom_bar, width=200, image=PLAY_IMAGE, text="Jouer toutes les pistes", fg_color=COLORS["main"], hover_color=COLORS["secondary"], command=self.play_all_tracks)
+        self.play_pause_all_button = ctk.CTkButton(self.bottom_bar, width=200, image=PLAY_IMAGE, text="Jouer toutes les pistes", fg_color=COLORS["main"], hover_color=COLORS["secondary"], command=self.toggle_play_all)
         self.play_pause_all_button.place(relx=0.5, rely=0.5, anchor="center")
-        
+
 
     def import_audio(self):
         file_path = filedialog.askopenfilename(
@@ -494,19 +561,102 @@ class App(ctk.CTk):
             self.bottom_bar.grid()
             self.default_label.place_forget()
 
+    def toggle_play_all(self):
+        """Toggle between play all and stop all."""
+        if self.is_playing_all:
+            self.stop_all_tracks()
+        else:
+            self.play_all_tracks()
+
     def play_all_tracks(self):
         """Lance la lecture de toutes les pistes audio en même temps."""
-        self.play_pause_all_button.configure(image=PAUSE_IMAGE, text="Arrêter", command=self.stop_all_tracks)
+        if self.is_playing_all:
+            return
         
+        self.play_pause_all_button.configure(image=PAUSE_IMAGE, text="Arrêter")
+        
+        if not self.track_frames:
+            return
+        
+        # Collect all filtered audio data with same length
+        all_audio_data = []
+        max_length = 0
+        sample_rate = None
+        
+        # First pass: get max length and sample rate
         for track in self.track_frames:
-            if not track.is_playing and track.audio_handler.data is not None:
-                # Apply filters and play
+            if track.audio_handler.data is not None and not track.is_playing:
                 filtered_data = track.apply_filters()
-                sd.play(filtered_data, track.audio_handler.sample_rate)
+                all_audio_data.append(filtered_data)
+                max_length = max(max_length, len(filtered_data))
+                if sample_rate is None:
+                    sample_rate = track.audio_handler.sample_rate
+        
+        if not all_audio_data or sample_rate is None:
+            return
+        
+        # Pad all audio to same length and mix them
+        mixed_audio = np.zeros(max_length)
+        for audio_data in all_audio_data:
+            padded = np.zeros(max_length)
+            padded[:len(audio_data)] = audio_data
+            mixed_audio += padded
+        
+        # Normalize to prevent clipping
+        max_val = np.max(np.abs(mixed_audio))
+        if max_val > 0:
+            mixed_audio = mixed_audio / max_val * 0.5
+        
+        # Play mixed audio
+        try:
+            sd.play(mixed_audio, sample_rate)
+        except Exception as e:
+            print(f"Error playing audio: {e}")
+            return
+        
+        self.is_playing_all = True
+        
+        # Update all tracks
+        for track in self.track_frames:
+            if track.audio_handler.data is not None and not track.is_playing:
                 track.is_playing = True
                 track.play_pause_button.configure(image=track.pause_image)
                 track.start_playhead()
                 threading.Thread(target=track._monitor_playback, daemon=True).start()
+        
+        # Monitor playback completion
+        threading.Thread(target=self._monitor_all_playback, daemon=True).start()
+    
+    def _monitor_all_playback(self):
+        """Monitor when all tracks finish playing."""
+        try:
+            sd.wait()
+        except Exception:
+            pass
+        
+        # Reset the button and tracks when playback finishes
+        if self.winfo_exists():
+            self.after(0, self._finish_all_playback)
+    
+    def _finish_all_playback(self):
+        """Called when all tracks finish playing."""
+        if not self.winfo_exists():
+            return
+        
+        self.is_playing_all = False
+        try:
+            self.play_pause_all_button.configure(image=PLAY_IMAGE, text="Jouer toutes les pistes")
+        except Exception:
+            pass
+        
+        # Reset all tracks
+        for track in self.track_frames:
+            track.is_playing = False
+            try:
+                track.play_pause_button.configure(image=track.play_image)
+            except Exception:
+                pass
+            track.stop_playhead()
 
     def on_track_deleted(self, track):
         """Appelé quand une piste est supprimée."""
@@ -519,12 +669,24 @@ class App(ctk.CTk):
 
     def stop_all_tracks(self):
         """Arrête la lecture de toutes les pistes audio."""
-        sd.stop()
-        self.play_pause_all_button.configure(image=PLAY_IMAGE, text="Jouer toutes les pistes", command=self.play_all_tracks)
+        try:
+            sd.stop()
+        except Exception:
+            pass
+        
+        self.is_playing_all = False
+        try:
+            self.play_pause_all_button.configure(image=PLAY_IMAGE, text="Jouer toutes les pistes")
+        except Exception:
+            pass
+        
         for track in self.track_frames:
             if track.is_playing:
                 track.is_playing = False
-                track.play_pause_button.configure(image=track.play_image)
+                try:
+                    track.play_pause_button.configure(image=track.play_image)
+                except Exception:
+                    pass
                 track.stop_playhead()
 
        
