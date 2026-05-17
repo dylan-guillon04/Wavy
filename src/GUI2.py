@@ -461,15 +461,18 @@ class App(ctk.CTk):
         self.track_area.pack(fill="both", expand=True)
         
         self.track_frames = []
+        
+        self.default_label = ctk.CTkLabel(self.content_frame, text="Importez une piste audio pour commencer", text_color=COLORS["secondary_text"])
+        self.default_label.place(relx=0.5, rely=0.5, anchor="center")
 
         #### Bottom Bar (Footer)
-        self.bottom_bar = ctk.CTkFrame(self.main_frame, fg_color=COLORS["menu"], corner_radius=10, height=80)
-        self.bottom_bar.grid(row=2, column=0, sticky="ew", pady=(20, 0))
+        self.bottom_bar = ctk.CTkFrame(self.main_frame, fg_color=COLORS["menu"], corner_radius=10, height=60)
+        self.bottom_bar.grid(row=2, column=0, sticky="ew")
         self.bottom_bar.grid_propagate(False)
         self.bottom_bar.grid_remove()  # Initially hidden
         
-        self.play_pause_all_button = ctk.CTkButton(self.bottom_bar, width=100, image=PLAY_IMAGE, text="Jouer toutes les pistes", fg_color=COLORS["main"], hover_color=COLORS["secondary"], command=self.play_all_tracks, font=("Helvetica", 14, "bold"))
-        self.play_pause_all_button.pack(side="left", padx=20, pady=20)
+        self.play_pause_all_button = ctk.CTkButton(self.bottom_bar, width=200, image=PLAY_IMAGE, text="Jouer toutes les pistes", fg_color=COLORS["main"], hover_color=COLORS["secondary"], command=self.play_all_tracks)
+        self.play_pause_all_button.place(relx=0.5, rely=0.5, anchor="center")
         
 
     def import_audio(self):
@@ -489,6 +492,7 @@ class App(ctk.CTk):
         # Show bottom bar when first track is loaded
         if len(self.track_frames) == 1:
             self.bottom_bar.grid()
+            self.default_label.place_forget()
 
     def play_all_tracks(self):
         """Lance la lecture de toutes les pistes audio en même temps."""
