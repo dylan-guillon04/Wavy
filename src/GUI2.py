@@ -24,10 +24,7 @@ COLORS = {
     "secondary": "#E24211",
 }
 
-
-ctk.set_appearance_mode("light") 
-ctk.set_default_color_theme("blue")
-
+# Load filter images files mapping
 FILTER_IMG_FILES = {
     "Passe bas": "filter-lowpass.png",
     "Passe haut": "filter-highpass.png",
@@ -35,9 +32,32 @@ FILTER_IMG_FILES = {
     "Rejecteur": "filter-notch.png"
 }
 
-
 def get_filter_icon_path(filename):
     return os.path.join(os.path.dirname(__file__), "statics", filename)
+
+# Load global images
+PLAY_IMAGE = None
+PAUSE_IMAGE = None
+DELETE_IMAGE = None
+DELETE_HOVER_IMAGE = None
+
+def load_global_images():
+    """Charge toutes les images en tant que variables globales."""
+    global PLAY_IMAGE, PAUSE_IMAGE, DELETE_IMAGE, DELETE_HOVER_IMAGE
+    
+    play_icon_path = get_filter_icon_path("play.png")
+    stop_icon_path = get_filter_icon_path("stop.png")
+    delete_icon_path = get_filter_icon_path("delete.png")
+    delete_red_icon_path = get_filter_icon_path("delete-red.png")
+    
+    PLAY_IMAGE = ctk.CTkImage(light_image=Image.open(play_icon_path), size=(20, 20))
+    PAUSE_IMAGE = ctk.CTkImage(light_image=Image.open(stop_icon_path), size=(20, 20))
+    DELETE_IMAGE = ctk.CTkImage(light_image=Image.open(delete_icon_path), size=(20, 20))
+    DELETE_HOVER_IMAGE = ctk.CTkImage(light_image=Image.open(delete_red_icon_path), size=(20, 20))
+
+
+# Load images on module initialization
+load_global_images()
 
 
 class FilterBlock(ctk.CTkFrame):
@@ -52,14 +72,20 @@ class FilterBlock(ctk.CTkFrame):
         icon_path = get_filter_icon_path(FILTER_IMG_FILES[filter_type])
         self.icon_image = ctk.CTkImage(light_image=Image.open(icon_path), size=(32, 32))
         self.icon_label = ctk.CTkLabel(self, image=self.icon_image, text="")
-        self.icon_label.grid(row=1, column=0, rowspan=2, padx=5)
+        self.icon_label.grid(row=0, column=0, rowspan=3, padx=5)
 
         self.title_label = ctk.CTkLabel(self, text=filter_type, font=("Helvetica", 13, "bold"), text_color=COLORS["primary_text"], bg_color="transparent")
-        self.title_label.grid(row=0, column=0, columnspan=3, padx=5, sticky="n")
+        self.title_label.grid(row=0, column=0, columnspan=3, padx=5, pady=5, sticky="n")
+        
+        # Delete button (using global images)
+        self.delete_btn = ctk.CTkButton(self, image=DELETE_HOVER_IMAGE, text="", width=25, height=25, fg_color="transparent", hover_color=COLORS["secondary"], command=self.delete_filter)
+        self.delete_btn.grid(row=0, column=2, padx=5, pady=5, sticky="ne")
+        self.delete_btn.bind("<Enter>", self._on_delete_enter)
+        self.delete_btn.bind("<Leave>", self._on_delete_leave)
 
         self.param_label = ctk.CTkLabel(self, text="Fréquence de coupure (Hz)", font=("Helvetica", 10), text_color=COLORS["secondary_text"])
         self.param_label.grid(row=1, column=1, padx=5, pady=5)
-        self.param_entry = ctk.CTkEntry(self, width=60, height=20, font=("Helvetica", 10), fg_color=COLORS["bottom_gradient"], text_color=COLORS["primary_text"], border_width=2, border_color=COLORS["background"], corner_radius=5)
+        self.param_entry = ctk.CTkEntry(self, width=50, height=20, font=("Helvetica", 10), fg_color=COLORS["bottom_gradient"], text_color=COLORS["primary_text"], border_width=2, border_color=COLORS["background"], corner_radius=5)
         self.param_entry.grid(row=1, column=2, padx=5, pady=5)
         self.param_entry.insert(0, "1000")
         self.param_entry.bind("<Return>", lambda e: self.update_slider(self.param_entry.get()))
@@ -79,6 +105,24 @@ class FilterBlock(ctk.CTkFrame):
             self.param_slider.set(freq)
         except ValueError:
             pass
+    
+    def _on_delete_enter(self, event):
+        self.delete_btn.configure(image=DELETE_IMAGE)
+    
+    def _on_delete_leave(self, event):
+        self.delete_btn.configure(image=DELETE_HOVER_IMAGE)
+    
+    def delete_filter(self):
+        """Supprime ce bloc de filtre."""
+        # Find the parent ScrollableFrame and remove this filter block from its list
+        audiotrack = self.master.master.master.master
+        if isinstance(audiotrack, AudioTrack) and self in audiotrack.filter_blocks:
+            audiotrack.filter_blocks.remove(self)
+            # If no more filter blocks, destroy the filter area
+            if len(audiotrack.filter_blocks) == 0 and audiotrack.filter_area is not None:
+                audiotrack.filter_area.master.master.destroy()
+                audiotrack.filter_area = None
+        self.destroy()
 
 
 class DragableFilterBlock(ctk.CTkFrame):
@@ -136,29 +180,35 @@ class DragableFilterBlock(ctk.CTkFrame):
 
 
 class AudioTrack(ctk.CTkFrame):
-    def __init__(self, master, file_path, **kwargs):
+    def __init__(self, master, file_path, app_ref=None, **kwargs):
         super().__init__(master, fg_color=COLORS["bottom_gradient"], corner_radius=10, **kwargs)
         self.audio_handler = AudioHandler()
         self.file_path = file_path
         self.is_playing = False
         self.filter_blocks = []
+        self.app_ref = app_ref
+        
+        # Reference global images
+        self.play_image = PLAY_IMAGE
+        self.pause_image = PAUSE_IMAGE
+        self.delete_image = DELETE_HOVER_IMAGE
+        self.delete_hover_image = DELETE_IMAGE
 
         loaded = self.audio_handler.load_audio(file_path)
 
         header = ctk.CTkFrame(self, fg_color="transparent")
         header.pack(fill="x", padx=10, pady=(10, 0))
 
-        # Load play/pause images
-        play_icon_path = get_filter_icon_path("play.png")
-        stop_icon_path = get_filter_icon_path("stop.png")
-        self.play_image = ctk.CTkImage(light_image=Image.open(play_icon_path), size=(20, 20))
-        self.pause_image = ctk.CTkImage(light_image=Image.open(stop_icon_path), size=(20, 20))
-
-        self.play_pause_button = ctk.CTkButton(header, image=self.play_image, text="", width=30, height=30, fg_color=COLORS["main"], hover_color=COLORS["secondary"], command=self.toggle_play_pause, state="normal" if loaded else "disabled")
+        self.play_pause_button = ctk.CTkButton(header, image=PLAY_IMAGE, text="", width=30, height=30, fg_color=COLORS["main"], hover_color=COLORS["secondary"], command=lambda: self.toggle_play_pause(master), state="normal" if loaded else "disabled")
         self.play_pause_button.pack(side="left", padx=(0, 10))
         
         self.file_label = ctk.CTkLabel(header, text=os.path.basename(file_path), anchor="w", text_color=COLORS["primary_text"], font=("Helvetica", 14, "bold"))
         self.file_label.pack(side="left", fill="x", expand=True)
+        
+        self.delete_track_button = ctk.CTkButton(header, image=DELETE_HOVER_IMAGE, text="", width=30, height=30, fg_color="transparent", hover_color=COLORS["secondary"], command=self.delete_track)
+        self.delete_track_button.pack(side="right", padx=(10, 0))
+        self.delete_track_button.bind("<Enter>", self._on_delete_track_enter)
+        self.delete_track_button.bind("<Leave>", self._on_delete_track_leave)
 
         # Matplotlib figure
         self.fig = Figure(figsize=(10, 2), dpi=80, facecolor=COLORS["background"])
@@ -195,7 +245,40 @@ class AudioTrack(ctk.CTkFrame):
         if self.audio_handler.data is not None:
             self.playback_data = self.audio_handler.data * 0.5
 
-    def toggle_play_pause(self):
+    def apply_filters(self):
+        """Applique tous les filtres en cascade aux données audio."""
+        data = self.audio_handler.data * 0.5
+        
+        if not self.filter_blocks:
+            return data
+        
+        filter_processor = FilterProcessor()
+        
+        # Apply filters in cascade
+        for block in self.filter_blocks:
+            try:
+                cutoff_str = block.param_entry.get()
+                cutoff = float(cutoff_str)
+                filter_type = block.filter_type
+                sample_rate = self.audio_handler.sample_rate
+                
+                if filter_type == "Passe bas":
+                    data = filter_processor.low_pass(data, sample_rate, cutoff)
+                elif filter_type == "Passe haut":
+                    data = filter_processor.high_pass(data, sample_rate, cutoff)
+                elif filter_type == "Sélecteur":
+                    # For band-pass, use cutoff as center frequency with bandwidth
+                    data = filter_processor.band_pass(data, sample_rate, cutoff * 0.8, cutoff * 1.2)
+                elif filter_type == "Rejecteur":
+                    # For band-stop, use cutoff as center frequency with bandwidth
+                    data = filter_processor.band_stop(data, sample_rate, cutoff * 0.8, cutoff * 1.2)
+            except (ValueError, AttributeError):
+                # If error in filter parameters, skip this filter
+                pass
+        
+        return data
+
+    def toggle_play_pause(self, master):
         if self.audio_handler.data is None:
             return
 
@@ -206,7 +289,9 @@ class AudioTrack(ctk.CTkFrame):
             self.stop_playhead()
         else:
             sd.stop()
-            sd.play(self.playback_data, self.audio_handler.sample_rate)
+            # Apply filters before playing
+            filtered_data = self.apply_filters()
+            sd.play(filtered_data, self.audio_handler.sample_rate)
             self.is_playing = True
             self.play_pause_button.configure(image=self.pause_image)
             self.start_playhead()
@@ -312,6 +397,24 @@ class AudioTrack(ctk.CTkFrame):
         block.pack(side="left", padx=(0, 5))
         
         self.filter_blocks.append(block)
+    
+    def _on_delete_track_enter(self, event):
+        self.delete_track_button.configure(image=DELETE_IMAGE)
+    
+    def _on_delete_track_leave(self, event):
+        self.delete_track_button.configure(image=DELETE_HOVER_IMAGE)
+    
+    def delete_track(self):
+        """Supprime la piste audio actuelle."""
+        if self.is_playing:
+            sd.stop()
+            self.is_playing = False
+        
+        # Notify app that track is being deleted
+        if self.app_ref:
+            self.app_ref.on_track_deleted(self)
+        
+        self.destroy()
 
 
 class App(ctk.CTk):
@@ -329,6 +432,7 @@ class App(ctk.CTk):
         self.main_frame = ctk.CTkFrame(self, fg_color=COLORS["background"], corner_radius=10)
         self.main_frame.grid(row=0, column=0, sticky="nsew", padx=20, pady=20)
         self.main_frame.grid_columnconfigure(0, weight=1)
+        self.main_frame.grid_rowconfigure(1, weight=1)
 
         ### Top Bar
         self.top_bar = ctk.CTkFrame(self.main_frame, fg_color=COLORS["menu"], corner_radius=10, height=100)
@@ -358,6 +462,16 @@ class App(ctk.CTk):
         
         self.track_frames = []
 
+        #### Bottom Bar (Footer)
+        self.bottom_bar = ctk.CTkFrame(self.main_frame, fg_color=COLORS["menu"], corner_radius=10, height=80)
+        self.bottom_bar.grid(row=2, column=0, sticky="ew", pady=(20, 0))
+        self.bottom_bar.grid_propagate(False)
+        self.bottom_bar.grid_remove()  # Initially hidden
+        
+        self.play_pause_all_button = ctk.CTkButton(self.bottom_bar, width=100, image=PLAY_IMAGE, text="Jouer toutes les pistes", fg_color=COLORS["main"], hover_color=COLORS["secondary"], command=self.play_all_tracks, font=("Helvetica", 14, "bold"))
+        self.play_pause_all_button.pack(side="left", padx=20, pady=20)
+        
+
     def import_audio(self):
         file_path = filedialog.askopenfilename(
             filetypes=[
@@ -368,9 +482,46 @@ class App(ctk.CTk):
         if not file_path:
             return
 
-        track = AudioTrack(self.track_area, file_path)
+        track = AudioTrack(self.track_area, file_path, app_ref=self)
         track.pack(fill="x", pady=12)
         self.track_frames.append(track)
+        
+        # Show bottom bar when first track is loaded
+        if len(self.track_frames) == 1:
+            self.bottom_bar.grid()
+
+    def play_all_tracks(self):
+        """Lance la lecture de toutes les pistes audio en même temps."""
+        self.play_pause_all_button.configure(image=PAUSE_IMAGE, text="Arrêter", command=self.stop_all_tracks)
+        
+        for track in self.track_frames:
+            if not track.is_playing and track.audio_handler.data is not None:
+                # Apply filters and play
+                filtered_data = track.apply_filters()
+                sd.play(filtered_data, track.audio_handler.sample_rate)
+                track.is_playing = True
+                track.play_pause_button.configure(image=track.pause_image)
+                track.start_playhead()
+                threading.Thread(target=track._monitor_playback, daemon=True).start()
+
+    def on_track_deleted(self, track):
+        """Appelé quand une piste est supprimée."""
+        if track in self.track_frames:
+            self.track_frames.remove(track)
+        
+        # Hide bottom bar if no tracks left
+        if len(self.track_frames) == 0:
+            self.bottom_bar.grid_remove()
+
+    def stop_all_tracks(self):
+        """Arrête la lecture de toutes les pistes audio."""
+        sd.stop()
+        self.play_pause_all_button.configure(image=PLAY_IMAGE, text="Jouer toutes les pistes", command=self.play_all_tracks)
+        for track in self.track_frames:
+            if track.is_playing:
+                track.is_playing = False
+                track.play_pause_button.configure(image=track.play_image)
+                track.stop_playhead()
 
        
 
