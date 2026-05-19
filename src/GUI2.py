@@ -63,36 +63,84 @@ load_global_images()
 class FilterBlock(ctk.CTkFrame):
     def __init__(self, master, filter_type, app_ref, **kwargs):
         super().__init__(master, fg_color=COLORS["top_gradient"], border_width=2, border_color=COLORS["main"],
-                         corner_radius=10, width=220, height=100, **kwargs)
+                         corner_radius=10, **kwargs)
         self.pack_propagate(False)
         self.filter_type = filter_type
         self.app_ref = app_ref
+        self.filter_design_type = "butter"  # Type de filtre par défaut
+        self.filter_order = 2  # Ordre par défaut
 
 
         icon_path = get_filter_icon_path(FILTER_IMG_FILES[filter_type])
         self.icon_image = ctk.CTkImage(light_image=Image.open(icon_path), size=(32, 32))
         self.icon_label = ctk.CTkLabel(self, image=self.icon_image, text="")
-        self.icon_label.grid(row=0, column=0, rowspan=3, padx=5)
+        self.icon_label.grid(row=0, column=0, padx=10, pady=5, sticky="nw")
 
         self.title_label = ctk.CTkLabel(self, text=filter_type, font=("Helvetica", 13, "bold"), text_color=COLORS["primary_text"], bg_color="transparent")
-        self.title_label.grid(row=0, column=0, columnspan=3, padx=5, pady=5, sticky="n")
+        self.title_label.grid(row=0, column=1, columnspan=5, padx=10, pady=5, sticky="n")
         
         # Delete button (using global images)
         self.delete_btn = ctk.CTkButton(self, image=DELETE_HOVER_IMAGE, text="", width=25, height=25, fg_color="transparent", hover_color=COLORS["secondary"], command=self.delete_filter)
-        self.delete_btn.grid(row=0, column=2, padx=5, pady=5, sticky="ne")
+        self.delete_btn.grid(row=0, column=6, padx=10, pady=5, sticky="ne")
         self.delete_btn.bind("<Enter>", self._on_delete_enter)
         self.delete_btn.bind("<Leave>", self._on_delete_leave)
 
-        self.param_label = ctk.CTkLabel(self, text="Fréquence de coupure (Hz)", font=("Helvetica", 10), text_color=COLORS["secondary_text"])
-        self.param_label.grid(row=1, column=1, padx=5, pady=5)
-        self.param_entry = ctk.CTkEntry(self, width=50, height=20, font=("Helvetica", 10), fg_color=COLORS["bottom_gradient"], text_color=COLORS["primary_text"], border_width=2, border_color=COLORS["background"], corner_radius=5)
-        self.param_entry.grid(row=1, column=2, padx=5, pady=5)
+        # Frequency control
+        self.param_label = ctk.CTkLabel(self, text="Fréquence (Hz)", font=("Helvetica", 10), text_color=COLORS["secondary_text"])
+        self.param_label.grid(row=2, column=0, columnspan=5, padx=10, pady=0, sticky="w")
+        self.param_entry = ctk.CTkEntry(self, width=40, height=16, font=("Helvetica", 10), fg_color=COLORS["bottom_gradient"], text_color=COLORS["primary_text"], border_width=1, border_color=COLORS["background"], corner_radius=5, justify="center")
+        self.param_entry.grid(row=2, column=5, columnspan=2, padx=10, pady=0, sticky="ew")
         self.param_entry.insert(0, "1000")
         self.param_entry.bind("<Return>", lambda e: self.update_slider(self.param_entry.get()))
 
-        self.param_slider = ctk.CTkSlider(self, from_=20, to=20000, height=16, width=200, command=self.update_entry)
+        self.param_slider = ctk.CTkSlider(self, from_=20, to=20000, height=16, width=150, command=self.update_entry)
         self.param_slider.set(1000)
-        self.param_slider.grid(row=2, column=1, columnspan=2, padx=5, pady=5)
+        self.param_slider.grid(row=3, column=0, columnspan=7, padx=10, pady=(0, 10), sticky="ew")
+        
+        # Filter type selector
+        self.type_label = ctk.CTkLabel(self, text="Type", font=("Helvetica", 9), text_color=COLORS["secondary_text"])
+        self.type_label.grid(row=1, column=0, padx=10, pady=0, sticky="w")
+        
+        self.type_options = list(FilterProcessor.FILTER_TYPES.keys())
+        self.type_menu = ctk.CTkComboBox(self, values=self.type_options,
+                                         font=("Helvetica", 10), width=100, height=16, border_width=1,
+                                         fg_color=COLORS["bottom_gradient"],
+                                         command=self.on_filter_type_change)
+        self.type_menu.set(self.type_options[0])
+        self.type_menu.grid(row=1, column=1, columnspan=4, padx=10, pady=0, sticky="w")
+        
+        # Order control
+        self.order_label = ctk.CTkLabel(self, text="Ordre", font=("Helvetica", 9), text_color=COLORS["secondary_text"])
+        self.order_label.grid(row=1, column=5, padx=10, pady=0, sticky="w")
+        
+        self.order_var = tk.IntVar(value=2)
+        self.order_spinbox = ctk.CTkEntry(self, width=50, height=16, font=("Helvetica", 10), 
+                                          fg_color=COLORS["bottom_gradient"], 
+                                          text_color=COLORS["primary_text"], 
+                                          border_width=1, border_color=COLORS["background"], 
+                                          corner_radius=5, justify="center")
+        self.order_spinbox.grid(row=1, column=6, padx=10, pady=0, sticky="w")
+        self.order_spinbox.insert(0, "2")
+        self.order_spinbox.bind("<Return>", lambda e: self.update_order())
+
+    def on_filter_type_change(self, value):
+        """Appelé quand le type de filtre change."""
+        self.filter_design_type = FilterProcessor.FILTER_TYPES[value]
+    
+    def update_order(self):
+        """Met à jour l'ordre du filtre."""
+        try:
+            order = int(self.order_spinbox.get())
+            if order < 1:
+                order = 1
+            elif order > 20:
+                order = 20
+            self.filter_order = order
+            self.order_spinbox.delete(0, tk.END)
+            self.order_spinbox.insert(0, str(order))
+        except ValueError:
+            self.order_spinbox.delete(0, tk.END)
+            self.order_spinbox.insert(0, str(self.filter_order))
 
     def update_entry(self, value):
         freq = int(float(value))
@@ -115,12 +163,12 @@ class FilterBlock(ctk.CTkFrame):
     def delete_filter(self):
         """Supprime ce bloc de filtre."""
         # Find the parent ScrollableFrame and remove this filter block from its list
-        audiotrack = self.master.master.master.master
+        audiotrack = self.master.master
         if isinstance(audiotrack, AudioTrack) and self in audiotrack.filter_blocks:
             audiotrack.filter_blocks.remove(self)
             # If no more filter blocks, destroy the filter area
             if len(audiotrack.filter_blocks) == 0 and audiotrack.filter_area is not None:
-                audiotrack.filter_area.master.master.destroy()
+                audiotrack.filter_area.destroy()
                 audiotrack.filter_area = None
         self.destroy()
 
@@ -188,6 +236,7 @@ class AudioTrack(ctk.CTkFrame):
         self.filter_blocks = []
         self.app_ref = app_ref
         self.volume = 0.5  # Default volume at 50%
+        self.max_filters = 5
         
         # Reference global images
         self.play_image = PLAY_IMAGE
@@ -211,21 +260,31 @@ class AudioTrack(ctk.CTkFrame):
         self.delete_track_button.bind("<Enter>", self._on_delete_track_enter)
         self.delete_track_button.bind("<Leave>", self._on_delete_track_leave)
 
-        # Matplotlib figure
-        self.fig = Figure(figsize=(10, 2), dpi=80, facecolor=COLORS["background"])
-        self.ax = self.fig.add_subplot(111)
-        self.ax.set_facecolor(COLORS["background"])
-        self.fig.subplots_adjust(left=0, right=1, top=1, bottom=0)
+        # Matplotlib figures for waveform and frequency spectrum
+        self.fig_waveform = Figure(figsize=(8, 2), dpi=80, facecolor=COLORS["background"])
+        self.ax_waveform = self.fig_waveform.add_subplot(111)
+        self.ax_waveform.set_facecolor(COLORS["background"])
+        self.fig_waveform.subplots_adjust(left=0.1, right=0.95, top=0.95, bottom=0.15)
+        
+        self.fig_frequency = Figure(figsize=(8, 1.5), dpi=80, facecolor=COLORS["background"])
+        self.ax_frequency = self.fig_frequency.add_subplot(111)
+        self.ax_frequency.set_facecolor(COLORS["background"])
+        self.fig_frequency.subplots_adjust(left=0.1, right=0.95, top=0.95, bottom=0.15)
         
         self.canvas_widget = ctk.CTkFrame(self, fg_color="transparent")
         self.canvas_widget.pack(fill="both", expand=True, padx=10, pady=(10, 10))
         
-        # Canvas on the left
+        # Canvas on the left - with visualizations stacked vertically
         canvas_frame = ctk.CTkFrame(self.canvas_widget, fg_color="transparent")
         canvas_frame.pack(side="left", fill="both", expand=True)
         
-        self.mpl_canvas = FigureCanvasTkAgg(self.fig, master=canvas_frame)
-        self.mpl_canvas.get_tk_widget().pack(fill="both", expand=True)
+        # Waveform canvas (top)
+        self.waveform_canvas = FigureCanvasTkAgg(self.fig_waveform, master=canvas_frame)
+        self.waveform_canvas.get_tk_widget().pack(fill="both", expand=True)
+        
+        # Frequency spectrum canvas (bottom)
+        self.frequency_canvas = FigureCanvasTkAgg(self.fig_frequency, master=canvas_frame)
+        self.frequency_canvas.get_tk_widget().pack(fill="both", expand=True)
         
         # Volume slider on the right
         volume_frame = ctk.CTkFrame(self.canvas_widget, fg_color="transparent", width=50)
@@ -289,19 +348,26 @@ class AudioTrack(ctk.CTkFrame):
                     cutoff = float(cutoff_str)
                     filter_type = block.filter_type
                     sample_rate = self.audio_handler.sample_rate
+                    order = block.filter_order
+                    design_type = block.filter_design_type
                     
                     if filter_type == "Passe bas":
-                        data_filtered = filter_processor.low_pass(data_filtered, sample_rate, cutoff)
+                        data_filtered = filter_processor.low_pass(data_filtered, sample_rate, cutoff, 
+                                                                   order=order, filter_type=design_type)
                     elif filter_type == "Passe haut":
-                        data_filtered = filter_processor.high_pass(data_filtered, sample_rate, cutoff)
+                        data_filtered = filter_processor.high_pass(data_filtered, sample_rate, cutoff,
+                                                                    order=order, filter_type=design_type)
                     elif filter_type == "Sélecteur":
                         # For band-pass, use cutoff as center frequency with bandwidth
-                        data_filtered = filter_processor.band_pass(data_filtered, sample_rate, cutoff * 0.8, cutoff * 1.2)
+                        data_filtered = filter_processor.band_pass(data_filtered, sample_rate, cutoff * 0.8, cutoff * 1.2,
+                                                                    order=order, filter_type=design_type)
                     elif filter_type == "Rejecteur":
                         # For band-stop, use cutoff as center frequency with bandwidth
-                        data_filtered = filter_processor.band_stop(data_filtered, sample_rate, cutoff * 0.8, cutoff * 1.2)
-                except (ValueError, AttributeError):
+                        data_filtered = filter_processor.band_stop(data_filtered, sample_rate, cutoff * 0.8, cutoff * 1.2,
+                                                                    order=order, filter_type=design_type)
+                except (ValueError, AttributeError, Exception) as e:
                     # If error in filter parameters, skip this filter
+                    print(f"Erreur lors de l'application du filtre: {e}")
                     pass
         
         # Apply volume
@@ -360,7 +426,7 @@ class AudioTrack(ctk.CTkFrame):
                 self.playhead_line.remove()
                 self.playhead_line = None
                 if self.winfo_exists():
-                    self.mpl_canvas.draw_idle()
+                    self.waveform_canvas.draw_idle()
             except Exception:
                 self.playhead_line = None
 
@@ -382,8 +448,8 @@ class AudioTrack(ctk.CTkFrame):
                 self.playhead_line.remove()
             
             # Draw new playhead line
-            self.playhead_line = self.ax.axvline(x=elapsed, color=COLORS["secondary"], linewidth=2, alpha=0.8)
-            self.mpl_canvas.draw_idle()
+            self.playhead_line = self.ax_waveform.axvline(x=elapsed, color=COLORS["secondary"], linewidth=2, alpha=0.8)
+            self.waveform_canvas.draw_idle()
         except Exception:
             self.playhead_line = None
         
@@ -413,11 +479,11 @@ class AudioTrack(ctk.CTkFrame):
 
     def draw_waveform(self):
         """Dessine la waveform avec matplotlib."""
-        self.ax.clear()
+        self.ax_waveform.clear()
         
         data = self.audio_handler.data
         if data is None or len(data) == 0:
-            self.mpl_canvas.draw_idle()
+            self.waveform_canvas.draw_idle()
             return
 
         # Normalize data
@@ -434,28 +500,84 @@ class AudioTrack(ctk.CTkFrame):
         self.time_axis = time_axis
         
         # Plot waveform
-        self.ax.plot(time_axis, reduced, color=COLORS["main"], linewidth=0.8)
-        self.ax.fill_between(time_axis, reduced, alpha=0.3, color=COLORS["main"])
+        self.ax_waveform.plot(time_axis, reduced, color=COLORS["main"], linewidth=0.8)
+        self.ax_waveform.fill_between(time_axis, reduced, alpha=0.3, color=COLORS["main"])
         
         # Configure axes
-        self.ax.set_xlim(0, duration)
-        self.ax.set_ylim(-1.1, 1.1)
-        self.ax.set_facecolor(COLORS["background"])
-        self.ax.spines['top'].set_visible(False)
-        self.ax.spines['right'].set_visible(False)
-        self.ax.spines['left'].set_visible(False)
-        self.ax.spines['bottom'].set_color(COLORS["secondary_text"])
-        self.ax.tick_params(colors=COLORS["secondary_text"], labelsize=8)
-        self.ax.set_xlabel('Time (s)', color=COLORS["secondary_text"], fontsize=8)
-        self.ax.grid(True, alpha=0.2, color=COLORS["secondary_text"], linestyle='--', linewidth=0.5)
+        self.ax_waveform.set_xlim(0, duration)
+        self.ax_waveform.set_ylim(-1.1, 1.1)
+        self.ax_waveform.set_facecolor(COLORS["background"])
+        self.ax_waveform.spines['top'].set_visible(False)
+        self.ax_waveform.spines['right'].set_visible(False)
+        self.ax_waveform.spines['left'].set_visible(False)
+        self.ax_waveform.spines['bottom'].set_color(COLORS["secondary_text"])
+        self.ax_waveform.tick_params(colors=COLORS["secondary_text"], labelsize=8, labelbottom=False, labelleft=False)
+        # self.ax_waveform.set_ylabel('Amplitude', color=COLORS["secondary_text"], fontsize=8)
+        # self.ax_waveform.set_xlabel('Time (s)', color=COLORS["secondary_text"], fontsize=8)
+        self.ax_waveform.grid(True, alpha=0.2, color=COLORS["secondary_text"], linestyle='--', linewidth=0.5)
         
-        self.mpl_canvas.draw_idle()
+        self.waveform_canvas.draw_idle()
+        
+        # Draw frequency spectrum
+        self.draw_frequency_spectrum()
+    
+    def draw_frequency_spectrum(self):
+        """Dessine le spectre fréquentiel sous forme de barplot."""
+        self.ax_frequency.clear()
+        
+        data = self.audio_handler.data
+        if data is None or len(data) == 0:
+            self.frequency_canvas.draw_idle()
+            return
+        
+        # Calculate FFT
+        sample_rate = self.audio_handler.sample_rate
+        n = len(data)
+        fft = np.fft.fft(data)
+        freqs = np.fft.fftfreq(n, 1/sample_rate)
+        
+        # Take only positive frequencies
+        positive_freqs_idx = freqs >= 0
+        freqs = freqs[positive_freqs_idx]
+        magnitude = np.abs(fft[positive_freqs_idx])
+        
+        # Normalize magnitude
+        magnitude = magnitude / np.max(magnitude) if np.max(magnitude) > 0 else magnitude
+        
+        # Downsample for visualization (limit to 200 frequency bins)
+        if len(freqs) > 200:
+            step = len(freqs) // 200
+            freqs = freqs[::step]
+            magnitude = magnitude[::step]
+        
+        # Plot frequency spectrum as bar plot
+        colors_array = [COLORS["main"]] * len(freqs)
+        self.ax_frequency.bar(freqs, magnitude, width=freqs[1]-freqs[0] if len(freqs) > 1 else 1, 
+                              color=colors_array, alpha=0.7, edgecolor=COLORS["secondary"], linewidth=0.3)
+        
+        # Configure axes
+        self.ax_frequency.set_xlim(0, sample_rate / 2)  # Nyquist frequency
+        self.ax_frequency.set_ylim(0, 1.1)
+        self.ax_frequency.set_facecolor(COLORS["background"])
+        self.ax_frequency.spines['top'].set_visible(False)
+        self.ax_frequency.spines['right'].set_visible(False)
+        self.ax_frequency.spines['left'].set_visible(False)
+        self.ax_frequency.spines['bottom'].set_color(COLORS["secondary_text"])
+        self.ax_frequency.tick_params(colors=COLORS["secondary_text"], labelsize=8, labelbottom=False, labelleft=False)
+        # self.ax_frequency.set_xlabel('Frequency (Hz)', color=COLORS["secondary_text"], fontsize=8)
+        # self.ax_frequency.set_ylabel('Magnitude', color=COLORS["secondary_text"], fontsize=8)
+        self.ax_frequency.grid(True, alpha=0.2, color=COLORS["secondary_text"], linestyle='--', linewidth=0.5, axis='y')
+        
+        self.frequency_canvas.draw_idle()
         
     def add_filter_block(self, filter_type):
         if self.filter_area is None:
-            self.filter_area = ctk.CTkScrollableFrame(self, fg_color="transparent", height=100, orientation="horizontal")
-            self.filter_area.pack(fill="x", padx=10)
+            self.filter_area = ctk.CTkFrame(self, fg_color="transparent", height=200)
+            self.filter_area.pack(fill="x", padx=10, pady=(0, 10))
         
+        if len(self.filter_blocks) >= self.max_filters:
+            return
+
         block = FilterBlock(self.filter_area, filter_type, app_ref=self)
         block.pack(side="left", padx=(0, 5))
         
