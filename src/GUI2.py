@@ -6,12 +6,14 @@ import time
 import os
 import sounddevice as sd
 import numpy as np
+from scipy import signal as scipy_signal
 from PIL import Image
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.figure import Figure
 from AudioHandler import AudioHandler
 from FilterProcessor import FilterProcessor
+from scipy.io import wavfile
 
 COLORS = {
     "background": "#121212",
@@ -126,6 +128,9 @@ class FilterBlock(ctk.CTkFrame):
     def on_filter_type_change(self, value):
         """Appelé quand le type de filtre change."""
         self.filter_design_type = FilterProcessor.FILTER_TYPES[value]
+        # Redraw frequency spectrum
+        if self.app_ref and hasattr(self.app_ref, 'draw_frequency_spectrum'):
+            self.app_ref.draw_frequency_spectrum()
     
     def update_order(self):
         """Met à jour l'ordre du filtre."""
@@ -138,6 +143,9 @@ class FilterBlock(ctk.CTkFrame):
             self.filter_order = order
             self.order_spinbox.delete(0, tk.END)
             self.order_spinbox.insert(0, str(order))
+            # Redraw frequency spectrum
+            if self.app_ref and hasattr(self.app_ref, 'draw_frequency_spectrum'):
+                self.app_ref.draw_frequency_spectrum()
         except ValueError:
             self.order_spinbox.delete(0, tk.END)
             self.order_spinbox.insert(0, str(self.filter_order))
@@ -146,11 +154,17 @@ class FilterBlock(ctk.CTkFrame):
         freq = int(float(value))
         self.param_entry.delete(0, tk.END)
         self.param_entry.insert(0, str(freq))
+        # Redraw frequency spectrum
+        if self.app_ref and hasattr(self.app_ref, 'draw_frequency_spectrum'):
+            self.app_ref.draw_frequency_spectrum()
         
     def update_slider(self, value):
         try:
             freq = int(value)
             self.param_slider.set(freq)
+            # Redraw frequency spectrum
+            if self.app_ref and hasattr(self.app_ref, 'draw_frequency_spectrum'):
+                self.app_ref.draw_frequency_spectrum()
         except ValueError:
             pass
     
@@ -170,6 +184,9 @@ class FilterBlock(ctk.CTkFrame):
             if len(audiotrack.filter_blocks) == 0 and audiotrack.filter_area is not None:
                 audiotrack.filter_area.destroy()
                 audiotrack.filter_area = None
+            # Redraw frequency spectrum after deletion
+            if hasattr(audiotrack, 'draw_frequency_spectrum'):
+                audiotrack.draw_frequency_spectrum()
         self.destroy()
 
 
@@ -271,12 +288,12 @@ class AudioTrack(ctk.CTkFrame):
         self.delete_track_button.bind("<Leave>", self._on_delete_track_leave)
 
         # Matplotlib figures for waveform and frequency spectrum
-        self.fig_waveform = Figure(figsize=(8, 1), dpi=80, facecolor=COLORS["background"])
+        self.fig_waveform = Figure(figsize=(10, 1), dpi=80, facecolor=COLORS["background"])
         self.ax_waveform = self.fig_waveform.add_subplot(111)
         self.ax_waveform.set_facecolor(COLORS["background"])
         self.fig_waveform.subplots_adjust(left=0.05, right=0.95, top=0.95, bottom=0.1)
         
-        self.fig_frequency = Figure(figsize=(8, 2), dpi=80, facecolor=COLORS["background"])
+        self.fig_frequency = Figure(figsize=(10, 3), dpi=80, facecolor=COLORS["background"])
         self.ax_frequency = self.fig_frequency.add_subplot(111)
         self.ax_frequency.set_facecolor(COLORS["background"])
         self.fig_frequency.subplots_adjust(left=0.05, right=0.95, top=0.95, bottom=0.1)
@@ -510,7 +527,7 @@ class AudioTrack(ctk.CTkFrame):
         self.time_axis = time_axis
         
         # Plot waveform
-        self.ax_waveform.plot(time_axis, reduced, color=COLORS["main"], linewidth=0.8)
+        self.ax_waveform.plot(time_axis, reduced, color=COLORS["main"], linewidth=0.6)
         self.ax_waveform.fill_between(time_axis, reduced, alpha=0.3, color=COLORS["main"])
         
         # Configure axes
@@ -541,33 +558,41 @@ class AudioTrack(ctk.CTkFrame):
             return
         
         # Calculate FFT
-        sample_rate = self.audio_handler.sample_rate
+        Fs = self.audio_handler.sample_rate
         n = len(data)
         fft = np.fft.fft(data)
-        freqs = np.fft.fftfreq(n, 1/sample_rate)
+        freqs = np.fft.fftfreq(n, 1/Fs)
+        
         
         # Take only positive frequencies
-        positive_freqs_idx = freqs >= 0
-        freqs = freqs[positive_freqs_idx]
-        magnitude = np.abs(fft[positive_freqs_idx])
+        # positive_freqs_idx = freqs >= 0
+        # freqs = freqs[positive_freqs_idx]
+        # magnitude = np.abs(fft[positive_freqs_idx])
+        magnitude = np.abs(fft) / n
+        magnitude = magnitude[range(int(n/2))]
+        freqs = freqs[range(int(n/2))]
         
         # Normalize magnitude
-        magnitude = magnitude / np.max(magnitude) if np.max(magnitude) > 0 else magnitude
+        # magnitude = magnitude / np.max(magnitude) if np.max(magnitude) > 0 else magnitude
         
+        print(len(freqs), len(magnitude))
         # Downsample for visualization (limit to 200 frequency bins)
-        if len(freqs) > 200:
-            step = len(freqs) // 200
-            freqs = freqs[::step]
-            magnitude = magnitude[::step]
+        # k = 100
+        # if len(freqs) > k:
+        #     step = len(freqs) // k
+        #     freqs = freqs[::step]
+        #     magnitude = magnitude[::step]
         
         # Plot frequency spectrum as bar plot
         colors_array = [COLORS["main"]] * len(freqs)
-        self.ax_frequency.bar(freqs, magnitude, width=freqs[1]-freqs[0] if len(freqs) > 1 else 1, 
-                              color=colors_array, alpha=0.7, edgecolor=COLORS["secondary"], linewidth=0.3)
+        # self.ax_frequency.bar(freqs, magnitude, width=freqs[1]-freqs[0] if len(freqs) > 1 else 1, 
+        #                       color=colors_array, alpha=0.7, linewidth=0.3)
+        self.ax_frequency.plot(freqs, magnitude, color=COLORS["main"], linewidth=0.6)
         
         # Configure axes
-        self.ax_frequency.set_xlim(0, sample_rate / 2)  # Nyquist frequency
-        self.ax_frequency.set_ylim(0, magnitude.max() * 1.1)
+        self.ax_frequency.set_xlim(1, Fs/2)
+        self.ax_frequency.set_xscale('log')  # Logarithmic scale for frequency
+        self.ax_frequency.set_ylim(0, max(magnitude) * 1.1)
         self.ax_frequency.set_facecolor(COLORS["background"])
         self.ax_frequency.spines['top'].set_visible(False)
         self.ax_frequency.spines['right'].set_visible(False)
@@ -578,13 +603,100 @@ class AudioTrack(ctk.CTkFrame):
         # self.ax_frequency.set_ylabel('Magnitude', color=COLORS["secondary_text"], fontsize=8)
         self.ax_frequency.grid(True, alpha=0.2, color=COLORS["secondary_text"], linestyle='--', linewidth=0.5, axis='y')
         
+        # Draw Bode plot if filters are applied
+        self.draw_filter_response()
         
         self.frequency_canvas.draw_idle()
+    
+    def draw_filter_response(self):
+        """Dessine la réponse en fréquence du/des filtre(s) appliqué(s) en orange."""
+        if not self.filter_blocks:
+            return
+        
+        sample_rate = self.audio_handler.sample_rate
+        
+        # Calculate combined filter response by multiplying individual responses
+        w = np.linspace(0, np.pi, 2000)
+        combined_h = np.ones_like(w, dtype=complex)
+        
+        for block in self.filter_blocks:
+            try:
+                cutoff_str = block.param_entry.get()
+                cutoff = float(cutoff_str)
+                filter_type = block.filter_type
+                order = block.filter_order
+                design_type = block.filter_design_type
+                
+                # Design individual filter
+                if filter_type == "Passe bas":
+                    b, a = self._design_filter_response(sample_rate, cutoff, btype='low', order=order, design_type=design_type)
+                elif filter_type == "Passe haut":
+                    b, a = self._design_filter_response(sample_rate, cutoff, btype='high', order=order, design_type=design_type)
+                elif filter_type == "Sélecteur":
+                    b, a = self._design_filter_response(sample_rate, cutoff * 0.8, cutoff * 1.2, btype='band', order=order, design_type=design_type)
+                elif filter_type == "Rejecteur":
+                    b, a = self._design_filter_response(sample_rate, cutoff * 0.8, cutoff * 1.2, btype='bandstop', order=order, design_type=design_type)
+                else:
+                    continue
+                
+                # Calculate frequency response for this filter
+                _, h = scipy_signal.freqz(b, a, worN=w)
+                
+                # Multiply responses (cascade)
+                combined_h *= h
+            except (ValueError, AttributeError, Exception) as e:
+                print(f"Erreur lors du calcul du filtre individuel: {e}")
+                continue
+        
+        # Convert frequency response to Hz
+        freqs = w * sample_rate / (2 * np.pi)
+        y_max = self.ax_frequency.get_ylim()[1]
+        magnitude = np.abs(combined_h) * y_max
+
+        
+        # Normalize to match the spectrum scale (0-1)
+        # magnitude = magnitude / np.max(magnitude) if np.max(magnitude) > 0 else magnitude
+        
+        # Plot Bode response in orange
+        try:
+            self.ax_frequency.plot(freqs, magnitude, color=COLORS["secondary"], linewidth=2, label='Filtre', zorder=10)
+        except Exception as e:
+            print(f"Erreur lors du traçage de la réponse en fréquence: {e}")
+    
+    def _design_filter_response(self, fs, cutoff1, cutoff2=None, btype='low', order=2, design_type='butter'):
+        """Design un filtre pour le calcul de réponse en fréquence."""
+        nyq = fs / 2.0
+        
+        if btype in ['band', 'bandstop']:
+            # Two cutoff frequencies
+            normal_cutoff = [max(0.001, min(0.999, c / nyq)) for c in [cutoff1, cutoff2]]
+        else:
+            # Single cutoff frequency
+            normal_cutoff = max(0.001, min(0.999, cutoff1 / nyq))
+        
+        try:
+            if design_type == "butter":
+                b, a = scipy_signal.butter(order, normal_cutoff, btype=btype, analog=False)
+            elif design_type == "cheby1":
+                b, a = scipy_signal.cheby1(order, 5, normal_cutoff, btype=btype, analog=False)
+            elif design_type == "cheby2":
+                b, a = scipy_signal.cheby2(order, 5, normal_cutoff, btype=btype, analog=False)
+            elif design_type == "bessel":
+                b, a = scipy_signal.bessel(order, normal_cutoff, btype=btype, analog=False)
+            elif design_type == "ellip":
+                b, a = scipy_signal.ellip(order, 5, 5, normal_cutoff, btype=btype, analog=False)
+            else:
+                b, a = scipy_signal.butter(order, normal_cutoff, btype=btype, analog=False)
+        except Exception as e:
+            print(f"Erreur lors du design du filtre: {e}")
+            b, a = scipy_signal.butter(order, normal_cutoff, btype=btype, analog=False)
+        
+        return b, a
         
     def add_filter_block(self, filter_type):
         if self.filter_area is None:
             self.filter_area = ctk.CTkFrame(self, fg_color="transparent", height=200)
-            self.filter_area.pack(fill="x", padx=10, pady=(0, 10))
+            self.filter_area.pack(fill="x", padx=10, pady=(0, 10), anchor="n")
         
         if len(self.filter_blocks) >= self.max_filters:
             return
@@ -593,6 +705,9 @@ class AudioTrack(ctk.CTkFrame):
         block.pack(side="left", padx=(0, 5))
         
         self.filter_blocks.append(block)
+        
+        # Redraw frequency spectrum after adding filter
+        self.draw_frequency_spectrum()
     
     def _on_delete_track_enter(self, event):
         self.delete_track_button.configure(image=DELETE_IMAGE)
@@ -828,3 +943,24 @@ class App(ctk.CTk):
 if __name__ == "__main__":
     app = App()
     app.mainloop()
+    
+    # Fs, data = wavfile.read('audio/guitar_perturbe.wav') # fréquence d'échantillonnage et données
+    # # Calcul de la FFT
+    # fft_result = np.fft.fft(data)
+    # frequencies = np.fft.fftfreq(len(data), 1/Fs)
+
+    # # On ne garde que les fréquences positives
+    # n = len(data)
+    # fft_magnitude = np.abs(fft_result) / n
+    # fft_magnitude = fft_magnitude[range(int(n/2))]
+    
+    # print(len(frequencies), len(fft_magnitude))
+
+    # # Affichage du résultat
+    # plt.figure(figsize=(10, 4))
+    # plt.plot(frequencies[:int(n/2)], fft_magnitude)
+    # plt.title("Spectre de fréquence (FFT)")
+    # plt.xlabel("Fréquence (Hz)")
+    # plt.ylabel("Amplitude")
+    # plt.grid()
+    # plt.show()
