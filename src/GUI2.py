@@ -194,6 +194,16 @@ class DragableFilterBlock(ctk.CTkFrame):
         self.bind("<ButtonRelease-1>", self.on_drop)
         self.bind("<Enter>", self.on_enter)
         self.bind("<Leave>", self.on_leave)
+        self.icon_label.bind("<ButtonPress-1>", self.on_start)
+        self.icon_label.bind("<B1-Motion>", self.on_drag)
+        self.icon_label.bind("<ButtonRelease-1>", self.on_drop)
+        self.icon_label.bind("<Enter>", self.on_enter)
+        self.icon_label.bind("<Leave>", self.on_leave)
+        self.label.bind("<ButtonPress-1>", self.on_start)
+        self.label.bind("<B1-Motion>", self.on_drag)
+        self.label.bind("<ButtonRelease-1>", self.on_drop)
+        self.label.bind("<Enter>", self.on_enter)
+        self.label.bind("<Leave>", self.on_leave)
         self.ghost = None
         
     def on_start(self, event):
@@ -261,15 +271,15 @@ class AudioTrack(ctk.CTkFrame):
         self.delete_track_button.bind("<Leave>", self._on_delete_track_leave)
 
         # Matplotlib figures for waveform and frequency spectrum
-        self.fig_waveform = Figure(figsize=(8, 2), dpi=80, facecolor=COLORS["background"])
+        self.fig_waveform = Figure(figsize=(8, 1), dpi=80, facecolor=COLORS["background"])
         self.ax_waveform = self.fig_waveform.add_subplot(111)
         self.ax_waveform.set_facecolor(COLORS["background"])
-        self.fig_waveform.subplots_adjust(left=0.1, right=0.95, top=0.95, bottom=0.15)
+        self.fig_waveform.subplots_adjust(left=0.05, right=0.95, top=0.95, bottom=0.1)
         
-        self.fig_frequency = Figure(figsize=(8, 1.5), dpi=80, facecolor=COLORS["background"])
+        self.fig_frequency = Figure(figsize=(8, 2), dpi=80, facecolor=COLORS["background"])
         self.ax_frequency = self.fig_frequency.add_subplot(111)
         self.ax_frequency.set_facecolor(COLORS["background"])
-        self.fig_frequency.subplots_adjust(left=0.1, right=0.95, top=0.95, bottom=0.15)
+        self.fig_frequency.subplots_adjust(left=0.05, right=0.95, top=0.95, bottom=0.1)
         
         self.canvas_widget = ctk.CTkFrame(self, fg_color="transparent")
         self.canvas_widget.pack(fill="both", expand=True, padx=10, pady=(10, 10))
@@ -557,7 +567,7 @@ class AudioTrack(ctk.CTkFrame):
         
         # Configure axes
         self.ax_frequency.set_xlim(0, sample_rate / 2)  # Nyquist frequency
-        self.ax_frequency.set_ylim(0, 1.1)
+        self.ax_frequency.set_ylim(0, magnitude.max() * 1.1)
         self.ax_frequency.set_facecolor(COLORS["background"])
         self.ax_frequency.spines['top'].set_visible(False)
         self.ax_frequency.spines['right'].set_visible(False)
@@ -567,6 +577,7 @@ class AudioTrack(ctk.CTkFrame):
         # self.ax_frequency.set_xlabel('Frequency (Hz)', color=COLORS["secondary_text"], fontsize=8)
         # self.ax_frequency.set_ylabel('Magnitude', color=COLORS["secondary_text"], fontsize=8)
         self.ax_frequency.grid(True, alpha=0.2, color=COLORS["secondary_text"], linestyle='--', linewidth=0.5, axis='y')
+        
         
         self.frequency_canvas.draw_idle()
         
@@ -609,8 +620,9 @@ class App(ctk.CTk):
     def __init__(self):
         super().__init__()
         self.title("Wavy - Audio Filter Pro")
-        self.geometry("1400x800")
-        self.resizable(False, False)
+        self.geometry("1600x900")
+        self.resizable(True, True)
+        self.minsize(1400, 800)
         self.configure(fg_color=COLORS["background"])
 
         self.grid_columnconfigure(0, weight=1)
