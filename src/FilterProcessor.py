@@ -10,7 +10,7 @@ class FilterProcessor:
         "Chebyshev Type I": "cheby1",
         "Chebyshev Type II": "cheby2",
         "Bessel": "bessel",
-        "Elliptic": "ellip"
+        "Cauer": "ellip"
     }
 
     @staticmethod
