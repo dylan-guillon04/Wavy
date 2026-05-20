@@ -275,17 +275,29 @@ class AudioTrack(ctk.CTkFrame):
 
         header = ctk.CTkFrame(self, fg_color="transparent")
         header.pack(fill="x", padx=10, pady=(10, 0))
-
-        self.play_pause_button = ctk.CTkButton(header, image=PLAY_IMAGE, text="", width=30, height=30, fg_color=COLORS["main"], hover_color=COLORS["secondary"], command=lambda: self.toggle_play_pause(master), state="normal" if loaded else "disabled")
-        self.play_pause_button.pack(side="left", padx=(0, 10))
         
-        self.file_label = ctk.CTkLabel(header, text=os.path.basename(file_path), anchor="w", text_color=COLORS["primary_text"], font=("Helvetica", 14, "bold"))
-        self.file_label.pack(side="left", fill="x", expand=True)
+        header.grid_rowconfigure(0, weight=1)
+        header.grid_rowconfigure(1, weight=1)
+        header.grid_columnconfigure(0, weight=2)
+        header.grid_columnconfigure(1, weight=100)
+        header.grid_columnconfigure(2, weight=6)
+
+        self.file_label = ctk.CTkLabel(header, text=os.path.basename(file_path), text_color=COLORS["primary_text"], font=("Helvetica", 14, "bold"))
+        self.file_label.grid(row=0, column=0, columnspan=2, padx=5, sticky="w")
+        
+        self.play_pause_button = ctk.CTkButton(header, image=PLAY_IMAGE, text="", width=30, height=30, fg_color=COLORS["main"], hover_color=COLORS["secondary"], command=lambda: self.toggle_play_pause(master), state="normal" if loaded else "disabled")
+        self.play_pause_button.grid(row=1, column=0, padx=(5,0), sticky="w")
         
         self.delete_track_button = ctk.CTkButton(header, image=DELETE_HOVER_IMAGE, text="", width=30, height=30, fg_color="transparent", hover_color=COLORS["secondary"], command=self.delete_track)
-        self.delete_track_button.pack(side="right", padx=(10, 0))
+        self.delete_track_button.grid(row=0, column=2, padx=5, sticky="e")
         self.delete_track_button.bind("<Enter>", self._on_delete_track_enter)
         self.delete_track_button.bind("<Leave>", self._on_delete_track_leave)
+        
+        self.slider_time = ctk.CTkSlider(header, from_=0, to=1, command=self.on_slider_time_change)
+        self.slider_time.grid(row=1, column=1, sticky="ew")
+        self.slider_time.set(0)
+        self.slider_time_dragging = False
+        self.current_playback_position = 0  # Position actuelle de lecture en secondes
 
         # Matplotlib figures for waveform and frequency spectrum
         self.fig_waveform = Figure(figsize=(10, 1), dpi=80, facecolor=COLORS["background"])
@@ -317,7 +329,7 @@ class AudioTrack(ctk.CTkFrame):
         volume_frame = ctk.CTkFrame(self.canvas_widget, fg_color="transparent", width=50)
         volume_frame.pack(side="right", fill="y", padx=(10, 0))
         
-        volume_label = ctk.CTkLabel(volume_frame, text="Vol", text_color=COLORS["secondary_text"])
+        volume_label = ctk.CTkLabel(volume_frame, text="Vol", width=40, text_color=COLORS["secondary_text"])
         volume_label.pack()
         
         self.volume_slider = ctk.CTkSlider(
@@ -348,8 +360,13 @@ class AudioTrack(ctk.CTkFrame):
         self.playback_data = None
         self.time_axis = None
         self.filter_area = None
+        self.slider_updating = False  # Flag pour éviter les boucles infinies de mise à jour
 
         if loaded:
+            # Initialiser le slider avec la durée correcte
+            duration = self.audio_handler.get_duration()
+            if duration > 0:
+                self.slider_time.configure(to=duration)
             self.prepare_playback_data()
             self.after(50, self.draw_waveform)
 
@@ -358,9 +375,22 @@ class AudioTrack(ctk.CTkFrame):
         if self.audio_handler.data is not None:
             self.playback_data = self.audio_handler.data * 0.5
 
-    def apply_filters(self):
-        """Applique tous les filtres en cascade aux données audio."""
+    def apply_filters(self, start_offset=0):
+        """Applique tous les filtres en cascade aux données audio à partir d'un offset.
+        
+        Args:
+            start_offset: Offset en secondes à partir duquel commencer la lecture
+        """
         data = self.audio_handler.data * 0.5
+        
+        # Convertir l'offset en nombre d'échantillons et découper les données
+        if start_offset > 0:
+            start_sample = int(start_offset * self.audio_handler.sample_rate)
+            start_sample = max(0, min(start_sample, len(data) - 1))
+            data = data[start_sample:]
+        
+        if len(data) == 0:
+            return np.array([], dtype=data.dtype)
         
         if not self.filter_blocks:
             data_filtered = data
@@ -407,6 +437,49 @@ class AudioTrack(ctk.CTkFrame):
             self.volume_value_label.configure(text=f"{int(float(value))}%")
         except Exception:
             pass
+    
+    def on_slider_time_change(self, value):
+        """Appelé quand le slider de temps est modifié par l'utilisateur."""
+        if self.audio_handler.data is None:
+            return
+        
+        try:
+            new_position = float(value)
+            self.slider_time_dragging = True
+            self.current_playback_position = new_position
+            
+            # Si la lecture est en cours, arrêter et recommencer à la nouvelle position
+            if self.is_playing:
+                try:
+                    sd.stop()
+                except Exception:
+                    pass
+                self.is_playing = False
+                
+                # Redémarrer la lecture à partir de la nouvelle position
+                try:
+                    filtered_data = self.apply_filters(start_offset=new_position)
+                    if len(filtered_data) > 0:
+                        sd.play(filtered_data, self.audio_handler.sample_rate)
+                        self.is_playing = True
+                        self.play_pause_button.configure(image=self.pause_image)
+                        self.start_playhead()
+                        threading.Thread(target=self._monitor_playback, daemon=True).start()
+                except Exception as e:
+                    self.is_playing = False
+                    print(f"Erreur lors de la lecture: {e}")
+            else:
+                # Juste mettre à jour la position et redessiner
+                if self.playhead_line is not None:
+                    self.playhead_line.remove()
+                    self.playhead_line = None
+                self.playhead_line = self.ax_waveform.axvline(x=new_position, color=COLORS["secondary"], linewidth=2, alpha=0.8)
+                self.waveform_canvas.draw_idle()
+            
+            self.slider_time_dragging = False
+        except (ValueError, Exception) as e:
+            print(f"Erreur avec le slider: {e}")
+            self.slider_time_dragging = False
 
     def toggle_play_pause(self, master):
         if self.audio_handler.data is None:
@@ -428,21 +501,24 @@ class AudioTrack(ctk.CTkFrame):
                 sd.stop()
             except Exception:
                 pass
-            # Apply filters before playing
-            filtered_data = self.apply_filters()
+            # Get current position from slider and apply filters from that position
+            current_position = float(self.slider_time.get())
+            self.current_playback_position = current_position
+            filtered_data = self.apply_filters(start_offset=current_position)
             try:
-                sd.play(filtered_data, self.audio_handler.sample_rate)
-                self.is_playing = True
-                self.play_pause_button.configure(image=self.pause_image)
-                self.start_playhead()
-                threading.Thread(target=self._monitor_playback, daemon=True).start()
+                if len(filtered_data) > 0:
+                    sd.play(filtered_data, self.audio_handler.sample_rate)
+                    self.is_playing = True
+                    self.play_pause_button.configure(image=self.pause_image)
+                    self.start_playhead()
+                    threading.Thread(target=self._monitor_playback, daemon=True).start()
             except Exception as e:
                 self.is_playing = False
                 print(f"Error playing audio: {e}")
             
     def start_playhead(self):
         self.playhead_animating = True
-        self.playhead_start_time = time.monotonic()
+        self.playhead_start_time = time.monotonic() - self.current_playback_position
         self.playhead_duration = self.audio_handler.get_duration()
         self._animate_playhead()
 
@@ -477,6 +553,12 @@ class AudioTrack(ctk.CTkFrame):
             # Draw new playhead line
             self.playhead_line = self.ax_waveform.axvline(x=elapsed, color=COLORS["secondary"], linewidth=2, alpha=0.8)
             self.waveform_canvas.draw_idle()
+            
+            # Mettre à jour la position du slider (sans déclencher on_slider_time_change)
+            if not self.slider_time_dragging:
+                self.slider_updating = True
+                self.slider_time.set(elapsed)
+                self.slider_updating = False
         except Exception:
             self.playhead_line = None
         
@@ -502,6 +584,12 @@ class AudioTrack(ctk.CTkFrame):
                 self.play_pause_button.configure(image=self.play_image)
             except Exception:
                 pass
+        # Remettre le slider à zéro à la fin de la lecture
+        try:
+            self.slider_time.set(0)
+            self.current_playback_position = 0
+        except Exception:
+            pass
         self.stop_playhead()
 
     def draw_waveform(self):
@@ -575,7 +663,6 @@ class AudioTrack(ctk.CTkFrame):
         # Normalize magnitude
         # magnitude = magnitude / np.max(magnitude) if np.max(magnitude) > 0 else magnitude
         
-        print(len(freqs), len(magnitude))
         # Downsample for visualization (limit to 200 frequency bins)
         # k = 100
         # if len(freqs) > k:
@@ -723,6 +810,13 @@ class AudioTrack(ctk.CTkFrame):
             except Exception:
                 pass
             self.is_playing = False
+        
+        # Reset slider
+        try:
+            self.slider_time.set(0)
+            self.current_playback_position = 0
+        except Exception:
+            pass
         
         # Notify app that track is being deleted
         if self.app_ref:
