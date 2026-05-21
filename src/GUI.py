@@ -916,7 +916,7 @@ class App(ctk.CTk):
         self.actions_frame.place(relx=0.02, rely=0.5, anchor="w")
         self.import_button = ctk.CTkButton(self.actions_frame, text="Importer", fg_color=COLORS["main"], hover_color=COLORS["secondary"], command=self.import_audio)
         self.import_button.pack(pady=5, fill="x")
-        # ctk.CTkButton(self.actions_frame, text="Enregistrer", fg_color="transparent", hover_color=COLORS["secondary"], border_width=1).pack(pady=5, fill="x")
+        ctk.CTkButton(self.actions_frame, text="Enregistrer", fg_color="transparent", hover_color=COLORS["secondary"], border_width=1).pack(pady=5, fill="x")
 
         # Filters blocks
         self.filters_frame = ctk.CTkFrame(self.top_bar, fg_color="transparent")
